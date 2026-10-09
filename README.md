@@ -151,8 +151,8 @@ Evaluation performed on the isolated 170-plate test set:
 
 ### 1. Clone the Repository
 ```bash
-git clone https://github.com/[YOUR-USERNAME]/[YOUR-REPO-NAME].git
-cd [YOUR-REPO-NAME]
+git clone https://github.com/Abdelrahman-UH/OCR-using-YOLO-Project.git
+cd OCR-using-YOLO-Project
 ```
 
 ### 2. Environment Setup
