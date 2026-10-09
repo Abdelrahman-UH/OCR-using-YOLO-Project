@@ -6,7 +6,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 An end-to-end computer vision and OCR system for automatic **Egyptian License Plate Recognition (ALPR)** using YOLO11. This project detects vehicles, localizes license plates, detects individual characters and numbers, reconstructs the true Arabic reading order (letters right-to-left, digits left-to-right), and tracks vehicles across video frames using ByteTrack and temporal voting consensus.
- ## **Live demo:** [https://your-app-name.streamlit.app](https://egyptian-plate-ocr.streamlit.app/)
+ ## **Live demo - streamlit link:** [https://your-app-name.streamlit.app](https://egyptian-plate-ocr.streamlit.app/)
 
 Developed as a graduation project for the **AMIT Data Science & AI Diploma** (project *"OCR using YOLO"*).
 
