@@ -1,0 +1,41 @@
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# Python cache and bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+
+# IDE / OS files
+.DS_Store
+.ipynb_checkpoints/
+.vscode/
+.idea/
+
+# Outputs and runs
+outputs/
+runs/
+
+# Pretrained vehicle model downloaded at runtime (do not commit)
+yolo11s.pt
+
+# Video files outside samples/
+*.mp4
+*.avi
+*.mov
+*.mkv
+!samples/*.mp4
+!samples/*.avi
+!samples/*.mov
+!samples/*.mkv
+
+# Temporary files
+*.tmp
+temp_*.png
+temp_*.jpg
+temp_*.mp4
