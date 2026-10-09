@@ -155,11 +155,15 @@ def load_models(weights_dir: str | Path = "weights") -> dict[str, YOLO]:
 def init_video_state(fps: float = 30.0) -> dict[str, Any]:
     """Initialize state dictionary for video tracking and voting."""
     return {
-        "tracks": {},       # track_id -> dict(votes, readings, locked, locked_reading, vehicle_cls)
-        "locked_rows": [],  # list of locked records for CSV and summary table
-        "frame_idx": 0,     # frame index processed
+        "tracks": {},                      # track_id -> votes, best frame per reading, vehicle class votes
         "fps": fps if fps > 0 else 30.0,
+        "time_sec": 0.0,                   # time of the current frame, set by app.py before each frame
     }
+
+
+def fmt_time(sec: float) -> str:
+    """Seconds -> mm:ss."""
+    return f"{int(sec // 60):02d}:{int(sec % 60):02d}"
 
 
 def crop_box(image: np.ndarray, box: list[float] | tuple[float, ...], pad: int = 0) -> tuple[np.ndarray, tuple[int, int]]:
@@ -175,6 +179,104 @@ def crop_box(image: np.ndarray, box: list[float] | tuple[float, ...], pad: int =
 
     crop = image[y1:y2, x1:x2].copy()  # detached crop copy
     return crop, (x1, y1)
+
+
+def add_reading(
+    state: dict[str, Any],
+    tr_id: int,
+    v_label: str,
+    plate_info: dict[str, Any],
+    v_crop: np.ndarray,
+    plate_box_local: list[float],
+) -> None:
+    """Add one frame's reading to the votes of a track, and keep the best frame per reading."""
+    tracks = state["tracks"]
+    if tr_id not in tracks:
+        tracks[tr_id] = {
+            "votes": Counter(),            # plate_text -> number of frames that read it
+            "vehicle": Counter(),          # car / truck can flicker between frames, so vote it too
+            "best": {},                    # plate_text -> best frame for that reading
+            "first_sec": state["time_sec"],
+        }
+    tr = tracks[tr_id]
+    tr["vehicle"][v_label] += 1
+
+    text = plate_info["plate_text"]
+    if len(text) < 3:
+        return                                             # too short to be a real plate
+
+    tr["votes"][text] += 1
+
+    score = plate_info["ocr_conf"] * plate_info["conf"]    # how sure the models were in this frame
+    old = tr["best"].get(text)
+    if old is not None and old["score"] >= score:
+        return                                             # an earlier frame was better
+
+    # small copy of the car with its plate box, to show the best frame at the end
+    factor = min(1.0, 400 / max(1, v_crop.shape[1]))       # max 400 px wide to save memory
+    car = cv2.resize(v_crop, None, fx=factor, fy=factor)
+    x1, y1, x2, y2 = [int(v * factor) for v in plate_box_local]
+    cv2.rectangle(car, (x1, y1), (x2, y2), (94, 197, 34), 2)   # green (BGR)
+
+    tr["best"][text] = {
+        "score": score,
+        "display_text": plate_info["display_text"],
+        "ocr_conf": plate_info["ocr_conf"],
+        "conf": plate_info["conf"],
+        "chars": plate_info["chars"],
+        "plate_crop": plate_info["plate_crop"],
+        "car_view": cv2.cvtColor(car, cv2.COLOR_BGR2RGB),
+        "time_sec": state["time_sec"],
+    }
+
+
+def leading_display(state: dict[str, Any], tr_id: int, min_votes: int) -> str | None:
+    """Text to show on the live frame: the reading with most votes so far, '?' until confirmed."""
+    tr = state["tracks"].get(tr_id)
+    if tr is None or not tr["votes"]:
+        return None
+    text, votes = tr["votes"].most_common(1)[0]
+    shown = tr["best"][text]["display_text"]
+    return shown if votes >= min_votes else f"{shown} ?"
+
+
+def summarize_tracks(state: dict[str, Any], min_votes: int = 3) -> list[dict[str, Any]]:
+    """One result per car: winning reading (most votes) + the best frame of that reading.
+
+    The same plate under two track IDs (ByteTrack lost the car for a moment) is merged.
+    """
+    by_plate: dict[str, dict[str, Any]] = {}
+
+    for tr_id, tr in state["tracks"].items():
+        if not tr["votes"]:
+            continue
+        text, votes = tr["votes"].most_common(1)[0]       # winning reading of this track
+        row = dict(tr["best"][text])                       # copy of the best frame info
+        row.update({
+            "plate_text": text,
+            "track_ids": [tr_id],
+            "votes": votes,
+            "frames_read": sum(tr["votes"].values()),      # frames where a plate was read
+            "vehicle": tr["vehicle"].most_common(1)[0][0],
+            "first_sec": tr["first_sec"],
+        })
+
+        old = by_plate.get(text)
+        if old is None:
+            by_plate[text] = row
+            continue
+
+        # same plate seen under another track ID -> merge into one car
+        old["track_ids"].append(tr_id)
+        old["votes"] += row["votes"]
+        old["frames_read"] += row["frames_read"]
+        old["first_sec"] = min(old["first_sec"], row["first_sec"])
+        if row["score"] > old["score"]:
+            for k in ["score", "display_text", "ocr_conf", "conf", "chars", "plate_crop", "car_view", "time_sec"]:
+                old[k] = row[k]
+
+    cars = [r for r in by_plate.values() if r["votes"] >= min_votes]   # enough frames agree
+    return sorted(cars, key=lambda r: r["first_sec"])                    # in order of appearance
 
 
 def process_frame(
@@ -250,16 +352,12 @@ def process_frame(
     # 2. Process each vehicle
     p_model: YOLO = models["plate"]
     c_model: YOLO = models["char"]
-    id_to_arabic = models.get("id_to_arabic", build_id_to_arabic(c_model))
+    id_to_arabic = models["id_to_arabic"]  # built once in load_models
 
     if state is None:
         state = init_video_state()
 
-    state["frame_idx"] += 1
-    current_time_sec = state["frame_idx"] / state["fps"]
-    mins = int(current_time_sec // 60)
-    secs = int(current_time_sec % 60)
-    time_str = f"{mins:02d}:{secs:02d}"  # mm:ss format for logging
+    min_votes = settings.get("min_votes", 3)
 
     for idx, (v_box, v_conf, v_label, tr_id) in enumerate(
         zip(vehicle_boxes, vehicle_confs, vehicle_labels, track_ids)
@@ -272,26 +370,6 @@ def process_frame(
             "plate": None,
             "fallback": fallback_used,
         }
-
-        # Check if this track is already locked in video mode
-        if mode == "video" and tr_id is not None and tr_id in state["tracks"]:
-            tr_info = state["tracks"][tr_id]
-            if tr_info.get("locked", False):
-                # Stop running plate and char models for this track!
-                locked_data = tr_info["locked_reading"]
-                v_det["plate"] = {
-                    "box": locked_data["box"],
-                    "conf": locked_data["conf"],
-                    "plate_text": locked_data["plate_text"],
-                    "display_text": locked_data["display_text"],
-                    "ocr_conf": locked_data["ocr_conf"],
-                    "chars": locked_data.get("chars", []),
-                    "plate_crop": locked_data.get("plate_crop"),
-                    "locked": True,
-                    "leading": False,
-                }
-                detections.append(v_det)
-                continue  # skip inference for locked track
 
         # Crop vehicle from frame
         v_crop, (vx_off, vy_off) = crop_box(frame_bgr, v_box)
@@ -382,68 +460,14 @@ def process_frame(
                     for b_f, b_l, n, c in zip(char_boxes_frame, char_boxes_local, char_names, char_confs)
                 ],
                 "plate_crop": plate_crop,
-                "locked": False,
-                "leading": False,
             }
 
-            # 5. Video voting per track ID
+            # 5. Video voting per track ID: every frame votes, best frame per reading is kept
             if mode == "video" and tr_id is not None:
-                if tr_id not in state["tracks"]:
-                    state["tracks"][tr_id] = {
-                        "votes": Counter(),
-                        "readings": {},
-                        "locked": False,
-                        "locked_reading": None,
-                        "vehicle_cls": v_label,
-                    }
-
-                tr_data = state["tracks"][tr_id]
-
-                # Keep only readings with len(plate_text) >= 3
-                if len(reading.plate_text) >= 3:
-                    p_txt = reading.plate_text
-                    tr_data["votes"][p_txt] += 1
-
-                    # Keep best reading quality metadata
-                    prev = tr_data["readings"].get(p_txt)
-                    if prev is None or (ocr_conf > prev["ocr_conf"]):
-                        tr_data["readings"][p_txt] = {
-                            "box": p_frame_box,
-                            "conf": best_plate_conf,
-                            "plate_text": p_txt,
-                            "display_text": reading.display_text,
-                            "ocr_conf": ocr_conf,
-                            "chars": plate_info["chars"],
-                            "plate_crop": plate_crop,
-                        }
-
-                    # Check locking condition: top reading has >= 3 votes and strictly more than 2nd
-                    top_two = tr_data["votes"].most_common(2)
-                    top_text, top_count = top_two[0]
-                    second_count = top_two[1][1] if len(top_two) > 1 else 0
-
-                    if top_count >= 3 and top_count > second_count:
-                        tr_data["locked"] = True
-                        tr_data["locked_reading"] = tr_data["readings"][top_text]
-                        plate_info["locked"] = True
-                        plate_info["plate_text"] = top_text
-                        plate_info["display_text"] = tr_data["locked_reading"]["display_text"]
-
-                        # Log one row for this locked track
-                        log_row = {
-                            "time": time_str,
-                            "track_id": tr_id,
-                            "vehicle": v_label,
-                            "plate": top_text,
-                            "det_conf": round(best_plate_conf, 2),
-                            "ocr_conf": round(tr_data["locked_reading"]["ocr_conf"], 2),
-                        }
-                        state["locked_rows"].append(log_row)
-                    else:
-                        # Before lock: display leading reading with '?'
-                        plate_info["leading"] = True
-                        leading_reading = tr_data["readings"][top_text]
-                        plate_info["display_text"] = f"{leading_reading['display_text']} ?"
+                add_reading(state, tr_id, v_label, plate_info, v_crop, best_plate_box)
+                shown = leading_display(state, tr_id, min_votes)
+                if shown is not None:
+                    plate_info["display_text"] = shown     # stable text instead of this frame's guess
 
             v_det["plate"] = plate_info
 
