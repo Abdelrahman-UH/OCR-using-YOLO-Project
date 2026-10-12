@@ -237,7 +237,5 @@ The full training pipeline, exploratory data analysis, augmentations, and evalua
 ## Team & Acknowledgements
 
 - **Team Members**:
-  - [NAME 1]
-  - [NAME 2]
+  - Abdelrahman Usama Hassan El-Sayed
 - **Diploma**: AMIT Data Science & AI Diploma
-- **Special Thanks**: Sincere appreciation to the instructors and mentors at **AMIT Learning** for their guidance and support throughout this graduation diploma project.
