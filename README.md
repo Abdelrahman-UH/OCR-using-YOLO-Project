@@ -9,7 +9,7 @@ An end-to-end computer vision and OCR system for automatic **Egyptian License Pl
 
 Developed as a graduation project for the **AMIT Data Science & AI Diploma** (project *"OCR using YOLO"*).
 ## **Live demo - streamlit link:** https://egyptian-plate-ocr.streamlit.app/
----
+
 
 
 
