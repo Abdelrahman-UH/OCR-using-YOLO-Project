@@ -46,7 +46,7 @@ flowchart LR
 
 ## Dataset & Data Preparation
 
-The model was trained on the **EALPR** dataset ([Ahmed Ramadan et al., ACIRS 2022](https://github.com/ahmedramadan96/EALPR)).
+The model was trained on the **EALPR** dataset (Youssef, Sayed & Ali, *ACIRS 2022*)- (https://github.com/ahmedramadan96/EALPR).
 
 ### Data Preparation Summary
 - **Initial Dataset**: 2,087 car images, 2,069 plate crops, and 10,797 character boxes.
@@ -99,8 +99,8 @@ Evaluation performed on the isolated 170-plate test set:
   - Character Error Rate (CER): **0.053**
   - Exact Plate Match: **93.5%**
 - **EasyOCR Baseline**:
-  - Character Error Rate (CER): **[FILL]**
-  - Exact Plate Match: **[FILL]**
+  - Character Error Rate (CER): **0.518**
+  - Exact Plate Match: **18.2%**
 
 ### Inference Latency (NVIDIA L4)
 - **Plate Detection**: $\approx 6.5\text{ ms}$ per image
