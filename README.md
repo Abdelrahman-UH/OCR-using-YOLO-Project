@@ -11,8 +11,7 @@ Developed as a graduation project for the **AMIT Data Science & AI Diploma** (pr
 ## **Live demo - streamlit link:** https://egyptian-plate-ocr.streamlit.app/
 ---
 
-<!-- Demo placeholder: add your demo GIF or application screenshot below -->
-![Egyptian License Plate Recognition Demo](assets/demo_placeholder.png)
+
 
 ---
 
